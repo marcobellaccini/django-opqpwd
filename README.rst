@@ -2,8 +2,8 @@
 opqpwd
 =====
 
-opqpwd is a password manager REST service with client-side encryption.
-It uses Django and Django REST framework.
+opqpwd is a password manager REST service with `client-side encryption <https://en.wikipedia.org/wiki/Client-side_encryption>`_.
+It uses `Django <https://www.djangoproject.com/>`_ and `Django REST framework <http://www.django-rest-framework.org/>`_.
 
 opqpwd stands for "opaque passwords": it encrypts password on the client-side,
 making them "opaque" to the server.
@@ -15,7 +15,8 @@ the service-registration username.
 Passwords (and metadata) are stored in your favorite database as Base64-encoded, 
 encrypted JSON.
 Encryption is performed using AES-256-CBC, with HMAC-SHA-256 authentication.
-scrypt is used as key derivation function.
+
+`scrypt <https://en.wikipedia.org/wiki/Scrypt>`_ is used as key derivation function.
 
 It features an example command-line client (you can find it in 
 the bin folder).
@@ -50,33 +51,43 @@ Quick start
     SOFTWARE, FOR TESTING PURPOSES ONLY).
 
 6.  Start the cli-client script::
+
     opqpwdcliclient
 
     Note: if you installed the package as a user library, the script will
     likely be in '.local/bin' in your home folder
 
 7.  Connect to the development server::
+
     connect http://127.0.0.1:8000
 
 8.  Register a user::
+
     adduser
+
     (if you want, you can also generate an authentication token to use along 
     with the password)
 
 9.  Login::
+
     login
 
 10. Add a password to the db::
+
     addpassword
 
 11. List all stored passwords titles::
+
     printall
 
 12. Print details of the password you just stored::
+
     print 1
 
 13. Upload encrypted passwords to the server::
+
     save
 
 14. Get help with the other commands::
+
     help
