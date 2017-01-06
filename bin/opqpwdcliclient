@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+#
+#   Copyright 2016 Marco Bellaccini
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
+# opqpwd interactive command-line client
+import opqpwd
+import cmd, getpass
+from opqpwd.clientfun import *
+from requests import ConnectionError
+
+
+class OpqPwdShell(cmd.Cmd):
+    intro = 'Welcome to the opqpwd command-line client.\nBEWARE: THIS IS A PROOF-OF-CONCEPT SOFTWARE, FOR TESTING PURPOSES ONLY.\nType help or ? to list commands.\n'
+    prompt = '(opqpwd) '
+    file = None
+    url = None
+    username = None
+    password = None
+    token = None
+    tokenpath = None
+    login = False
+    plist = None
+    unsavedChanges = False
+    
+
+    # ----- basic commands -----
+    def do_connect(self, arg):
+        'Connect to server instance:  CONNECT http://127.0.0.1:8000'
+        if len(parse(arg)) != 1:
+            print('Sorry, you must specify an url to connect to.')
+            print('Usage example: connect http://127.0.0.1:8000')
+            return
+        try:
+            checkconn(*parse(arg), username=None, password=None)
+        except ConnectionError:
+            print('CONNECT failed.')
+            return
+        self.url = arg.lower()
+        
+    def do_login(self, arg):
+        'Set credentials for login:  LOGIN'
+        self.login = False
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        self.username = input("Username: ")
+        self.password = getpass.getpass()
+        self.tokenpath = input("Token path (just press ENTER if tokenless): ")
+        if self.tokenpath:
+            # read token from file
+            self.token = gettoken(self.tokenpath)
+            if self.token == None:
+                print('Error getting token.')
+                return
+            # concatenate password and token
+            self.password = bytes(self.password,"utf8") + self.token
+        if not checkconn(baseurl=self.url, username=self.username, password=self.password):
+            print('LOGIN failed: credentials are invalid.')
+            self.username = None
+            self.password = None
+            self.tokenpath = None
+            return
+        else:
+            self.login = True
+            # get password list
+            self.plist = getpasswordlist(username=self.username, password=self.password, baseurl=self.url)
+        
+        
+    def do_adduser(self, arg):
+        'Add new user to the system:  ADDUSER'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        self.username = input("Choose Username: ")
+        self.password = getpass.getpass("Choose Password: ")
+        passconf = getpass.getpass("Re-type Password: ")
+        if passconf != self.password:
+            print('Sorry, passwords you provided do not match.')
+            return
+        ch = input('Do you want to generate an authentication token for the user? ([y]/n) ')
+        # if tokenized authentication
+        if not (ch == 'n' or ch =='no' or ch == 'N' or ch == 'NO'):
+            tpath = input("Enter the path for the token to generate: ")
+            if not gentokenfile(tpath):
+                print("Error generating token file.")
+                return
+            print('The token has been generated, you will use it for the authentication along with the password.')
+            print('PLEASE BACKUP YOUR TOKEN IN AT LEAST TWO DIFFERENT (AND SAFE) PLACES!')
+            # read token from file (used as a check)
+            self.token = gettoken(tpath)
+            if self.token == None:
+                print('Error getting token.')
+                return
+            # concatenate password and token
+            self.password = bytes(self.password,"utf8") + self.token
+        # add user
+        if not adduser(username=self.username, password=self.password, baseurl=self.url):
+            print('ADDUSER failed: user with this username already exists?')
+        
+    def do_addpassword(self, arg):
+        'Register new password:  ADDPASSWORD'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        passworddata = dict()
+        passworddata["title"] = input('Enter title: ')
+        passworddata["username"] = input('Enter username: ')
+        ch = input('Should I generate a password for you? ([y]/n) ')
+        # manual password input
+        if (ch == 'n' or ch =='no' or ch == 'N' or ch == 'NO'):
+            passworddata["password"] = getpass.getpass('Enter password: ')
+            password2 = getpass.getpass('Re-enter password: ')
+            if passworddata["password"] != password2:
+                print('Sorry, passwords do not match!')
+                return
+        # automatic password generation
+        else:
+            try:
+                plen = int(input('Insert password length. [20] '))
+            except ValueError:
+                plen = 20
+            passworddata["password"] = genpassw(plen)
+            print("Ok, I generated this password:")
+            print(passworddata["password"])
+            
+        passworddata["url"] = input('Enter url: ')
+        passworddata["notes"] = input('Enter notes: ')
+           
+        # add password
+        try:
+            self.plist = addToPasslist(self.plist, passworddata)
+        except ValueError:
+            # Error adding password
+            print('ADDPASSWORD failed: entry with this title already exists?')
+            return
+        # set unsavedChanges flag
+        self.unsavedChanges = True
+
+            
+    def do_printall(self, arg):
+        'Print user passwords summary:  PRINTALL'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        printsummary(self.plist)
+        
+    def do_print(self, arg):
+        'Print user password detail:  PRINT 1'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        if len(parse(arg)) != 1:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: print 1')
+            return
+        try:
+            index = int(*parse(arg))
+        except ValueError:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: print 1')
+            return
+        if index <= 0:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: print 1')
+            return
+        printdetail(self.plist, index)
+        
+    def do_delete(self, arg):
+        'Delete password entry:  DELETE 1'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        if len(parse(arg)) != 1:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        try:
+            index = int(*parse(arg))
+        except ValueError:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        if index <= 0:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        try:
+            title = self.plist[index-1]["title"]
+        except IndexError:
+            print("No such entry in password list.")
+            print('Error deleting password.')
+            return
+        print('This will delete password entry with this title:')
+        print(title)
+        ch = input('Should I proceed (y/[n])? ')
+        if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            print('Aborting operation.')
+            return
+        try:
+            self.plist = delFromPasslistByIndex(self.plist, index)
+        except (ValueError, IndexError):
+            # Error deleting password
+            print('Error deleting password.')
+            return
+        # set unsavedChanges flag
+        self.unsavedChanges = True
+            
+    def do_edit(self, arg):
+        'Edit password entry:  EDIT 1'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        if len(parse(arg)) != 1:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        try:
+            index = int(*parse(arg))
+        except ValueError:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        if index <= 0:
+            print('Sorry, you must specify an index number.')
+            print('Usage example: delete 1')
+            return
+        try:
+            title = self.plist[index-1]["title"]
+        except IndexError:
+            print("No such entry in password list.")
+            print('Error editing password.')
+            return
+        print('This will edit password entry with this title:')
+        print(title)
+        ch = input('Should I proceed (y/[n])? ')
+        if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            print('Aborting operation.')
+            return
+        
+        passworddata = dict()
+        passworddata["title"] = input('Enter title [' + plist[index-1]["title"] + ']: ')
+        if not passworddata["title"]:
+            passworddata["title"] = plist[index-1]["title"]
+            
+        passworddata["username"] = input('Enter username [' + plist[index-1]["username"] + ']: ')
+        if not passworddata["username"]:
+            passworddata["username"] = plist[index-1]["username"]
+        
+        ch = input('Change entry password? (y/[n]) ')
+        if (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            ch = input('Should I generate a password for you? ([y]/n) ')
+            # manual password input
+            if (ch == 'n' or ch =='no' or ch == 'N' or ch == 'NO'):
+                passworddata["password"] = getpass.getpass('Enter password: ')
+                npassword2 = getpass.getpass('Re-enter password: ')
+                if passworddata["password"] != npassword2:
+                    print('Sorry, passwords do not match!')
+                    return
+            # automatic password generation
+            else:
+                try:
+                    plen = int(input('Insert password length. [20] '))
+                except ValueError:
+                    plen = 20
+                passworddata["password"] = genpassw(plen)
+                print("Ok, I generated this password:")
+                print(passworddata["password"])
+        else:
+            passworddata["password"] = plist[index-1]["password"]
+            
+        passworddata["url"] = input('Enter url [' + plist[index-1]["url"] + ']: ')
+        if not passworddata["url"]:
+            passworddata["url"] = plist[index-1]["url"]
+            
+        passworddata["notes"] = input('Enter notes [' + plist[index-1]["notes"] + ']: ')
+        if not passworddata["notes"]:
+            passworddata["notes"] = plist[index-1]["notes"]
+        try:
+            self.plist = updToPasslist(self.plist, passworddata, pdindex)
+        except IndexError:
+            # Error editing password: invalid index
+            print("Error editing password: invalid index.")
+            return
+        except ValueError:
+            # Error editing password: password with this title exists
+            print("Error editing password: password with this title already exists.")
+            return
+        # set unsavedChanges flag
+        self.unsavedChanges = True
+            
+    
+    def do_deleteall(self, arg):
+        'Delete all user passwords:  DELETEALL'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        print('THIS WILL DELETE ALL THE PASSWORDS ASSOCIATED TO YOUR USER.')
+        ch = input('SHOULD I PROCEED (y/[n])? ')
+        if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            print('Aborting operation.')
+            return
+        # clear all user passwords
+        self.plist = list()
+        # set unsavedChanges flag
+        self.unsavedChanges = True
+    
+    def do_deleteuser(self, arg):
+        'Delete user:  DELETEUSER'
+        if not self.url:
+            print('Sorry, you must CONNECT first.')
+            return
+        if not self.login:
+            print('Sorry, you must LOGIN first.')
+            return
+        print('THIS WILL DELETE ALL THE PASSWORDS ASSOCIATED TO YOUR USER AND DELETE YOUR ACCOUNT.')
+        print('BEWARE: THIS HAS IMMEDIATE EFFECT (NO SAVE REQUIRED)!!!')
+        ch = input('SHOULD I PROCEED (y/[n])? ')
+        if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            print('Aborting operation.')
+            return
+        if not deluser(username=self.username, password=self.password, baseurl=self.url):
+            print('Error deleting user')
+            return
+        self.login = False
+        # clear unsavedChanges flag
+        self.unsavedChanges = False
+        
+    def do_save(self, arg):
+        'Save changes:  SAVE'
+        ch = input('Do you want to save the changes (y/[n])? ')
+        if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+            print('Aborting operation.')
+            return
+        if not save(username=self.username, password=self.password, plist=self.plist, baseurl=self.url):
+            print('Error saving changes.')
+            return
+        # clear unsavedChanges flag
+        self.unsavedChanges = False
+        
+    def do_bye(self, arg):
+        'Close opqpwd client and exit:  BYE'
+        if self.unsavedChanges:
+            ch = input('You have unsaved changes, exit anyway (y/[n])? ')
+            if not (ch == 'y' or ch =='yes' or ch == 'Y' or ch == 'YES'):
+                return
+        print('Thank you for using opqpwd')
+        #self.close()
+        return True
+        
+        
+#
+#    def precmd(self, line):
+#        line = line.lower()
+#        if self.file and 'playback' not in line:
+#            print(line, file=self.file)
+#        return line
+#    def close(self):
+#        if self.file:
+#            self.file.close()
+#            self.file = None
+
+def parse(arg):
+    'Convert a series of zero or more numbers to an argument tuple'
+    return tuple(map(str, arg.split()))
+
+if __name__ == '__main__':
+    OpqPwdShell().cmdloop()
