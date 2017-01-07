@@ -3,7 +3,8 @@ opqpwd
 ======
 
 opqpwd is a password manager REST service with `client-side encryption <https://en.wikipedia.org/wiki/Client-side_encryption>`_.
-It uses `Django <https://www.djangoproject.com/>`_ and `Django REST framework <http://www.django-rest-framework.org/>`_.
+
+It is written in Python 3, using `Django <https://www.djangoproject.com/>`_ and `Django REST framework <http://www.django-rest-framework.org/>`_.
 
 opqpwd stands for "opaque passwords": it encrypts password on the client-side,
 making them "opaque" to the server.
@@ -29,7 +30,7 @@ Quick start
 -----------
 
 1.  Make sure you meet all software dependencies (Django REST Framework, 
-    scrypt, pycrypto, requests and, of course, Django).
+    scrypt - you'll need libssl-dev for it, pycrypto, requests and, of course, Django).
 
 2.  Add "opqpwd" and "rest_framework" (of course, you have to install 
     Django REST Framework too!) to your INSTALLED_APPS setting like this::
@@ -40,9 +41,16 @@ Quick start
          'opqpwd',
      ]
 
+    In the same file (settings.py), specify this custom authentication backend::
+
+     # set custom authentication backend
+     AUTHENTICATION_BACKENDS = ['opqpwd.authentication.UserCredBackend']
+
 3.  Include the opqpwd URLconf in your project urls.py like this::
 
      url(r'^', include('opqpwd.urls')),
+
+    Note: make sure you import include with `from django.conf.urls import include`.
 
 4.  Run `python manage.py migrate` to create the opqpwd models.
 
@@ -55,7 +63,7 @@ Quick start
      opqpwdcliclient
 
     Note: if you installed the package as a user library, the script will
-    likely be in '.local/bin' in your home folder.
+    likely be in `.local/bin` in your home folder.
 
 7.  Connect to the development server::
 
